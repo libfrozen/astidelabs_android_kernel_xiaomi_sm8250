@@ -1,3 +1,5 @@
+#define pr_fmt(fmt) "millet-millet_pkg: " fmt
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
@@ -16,10 +18,21 @@
 #include <net/tcp.h>
 #include <net/inet_hashtables.h>
 #include <net/inet6_hashtables.h>
-#include <linux/millet.h>
+#include "millet.h"
+
 
 #define MAX_REC_UID 64
 static atomic_t uid_rec[MAX_REC_UID];
+extern int millet_sendmsg(enum MILLET_TYPE type, struct task_struct *t,
+		struct millet_data *data);
+extern int millet_sendto_user(struct task_struct *tsk,
+		struct millet_data *data, struct millet_sock *sk);
+extern int register_millet_hook(int type, recv_hook recv_from, send_hook send_to,
+		init_hook init);
+extern int unregister_millet_hook(int type);
+extern int init_millet_subsystem(int type);
+
+
 
 int pkg_stat_show(struct seq_file *m, void *v)
 {
@@ -28,7 +41,7 @@ int pkg_stat_show(struct seq_file *m, void *v)
 	for (i = 0; i < MAX_REC_UID; i++)
 		if (atomic_read(&uid_rec[i]))
 			seq_printf(m, "%d\t", atomic_read(&uid_rec[i]));
-	seq_puts(m, "\n");
+	seq_printf(m, "\n");
 
 	return 0;
 }
@@ -55,13 +68,13 @@ out:
 	return;
 }
 
-static int pkg_sendmsg(struct task_struct *tsk, struct millet_data *data,
-		       struct millet_sock *sk)
+static int pkg_sendmsg(struct task_struct *tsk,
+		struct millet_data *data, struct millet_sock *sk)
 {
 	int ret = RET_OK;
 
 	if (!sk || !data || !tsk) {
-		pr_err("%s input invalid\n", __func__);
+		pr_err("%s input invalid\n", __FUNCTION__);
 		return RET_ERR;
 	}
 
@@ -79,12 +92,14 @@ static void pkg_del_uid(uid_t uid)
 	uid_t inner_uid;
 
 	for (i = 0; i < MAX_REC_UID; i++) {
-		inner_uid = (uid_t)atomic_read(&uid_rec[i]);
+		inner_uid = (uid_t) atomic_read(&uid_rec[i]);
 		if (inner_uid == uid) {
 			atomic_set(&uid_rec[i], 0);
 			break;
 		}
 	}
+
+	return;
 }
 
 static void pkg_clear_all(void)
@@ -93,6 +108,8 @@ static void pkg_clear_all(void)
 
 	for (i = 0; i < MAX_REC_UID; i++)
 		atomic_set(&uid_rec[i], 0);
+
+	return;
 }
 
 static int find_and_clear_uid(uid_t uid)
@@ -115,7 +132,7 @@ static int find_and_clear_uid(uid_t uid)
 
 static void pkg_recv_hook(void *data, unsigned int len)
 {
-	struct millet_userconf *payload = (struct millet_userconf *)data;
+	struct millet_userconf *payload = (struct millet_userconf *) data;
 
 	switch (payload->mod.u_priv.pkg.cmd) {
 	case ADD_UID:
@@ -130,6 +147,8 @@ static void pkg_recv_hook(void *data, unsigned int len)
 	default:
 		break;
 	}
+
+	return;
 }
 
 static void pkg_init_millet(struct millet_sock *sk)
@@ -142,10 +161,8 @@ static uid_t __sock_i_uid(struct sock *sk)
 {
 	uid_t uid;
 
-	if (sk) {
-		read_lock_bh(&sk->sk_callback_lock);
-		uid = sk->sk_socket ? SOCK_INODE(sk->sk_socket)->i_uid.val : 0;
-		read_unlock_bh(&sk->sk_callback_lock);
+	if (sk && sk->sk_socket) {
+		uid = SOCK_INODE(sk->sk_socket)->i_uid.val;
 		return uid;
 	}
 
@@ -153,7 +170,7 @@ static uid_t __sock_i_uid(struct sock *sk)
 }
 
 static unsigned int pkg_ip4_in(void *priv, struct sk_buff *skb,
-			       const struct nf_hook_state *state)
+		const struct nf_hook_state *state)
 {
 	struct sock *sk;
 	struct millet_data data;
@@ -177,7 +194,7 @@ static unsigned int pkg_ip4_in(void *priv, struct sk_buff *skb,
 	if (!found)
 		return NF_ACCEPT;
 	data.mod.k_priv.pkg.owner_pid = 0;
-	data.mod.k_priv.pkg.pkg_owner = (int)uid;
+	data.mod.k_priv.pkg.pkg_owner = (int) uid;
 	if (millet_sendmsg(PKG_TYPE, current, &data) < 0)
 		pr_err("%s : up report failed!\n", __func__);
 
@@ -185,7 +202,7 @@ static unsigned int pkg_ip4_in(void *priv, struct sk_buff *skb,
 }
 
 static unsigned int pkg_ip6_in(void *priv, struct sk_buff *skb,
-			       const struct nf_hook_state *state)
+		const struct nf_hook_state *state)
 {
 	struct sock *sk;
 	struct millet_data data;
@@ -212,7 +229,7 @@ static unsigned int pkg_ip6_in(void *priv, struct sk_buff *skb,
 		return NF_ACCEPT;
 
 	data.mod.k_priv.pkg.owner_pid = 0;
-	data.mod.k_priv.pkg.pkg_owner = (int)uid;
+	data.mod.k_priv.pkg.pkg_owner = (int) uid;
 	if (millet_sendmsg(PKG_TYPE, current, &data) < 0)
 		pr_err("%s : up report failed!\n", __func__);
 
@@ -220,44 +237,44 @@ static unsigned int pkg_ip6_in(void *priv, struct sk_buff *skb,
 }
 
 static inline unsigned int pkg_ip4_out(void *priv, struct sk_buff *skb,
-				       const struct nf_hook_state *state)
+		const struct nf_hook_state *state)
 {
 	return NF_ACCEPT;
 }
 
 static inline unsigned int pkg_ip6_out(void *priv, struct sk_buff *skb,
-				       const struct nf_hook_state *state)
+		const struct nf_hook_state *state)
 {
 	return NF_ACCEPT;
 }
 
 static struct nf_hook_ops pkg_nf_ops[] = {
 
-	{
-		.hook = pkg_ip4_in,
-		.pf = NFPROTO_IPV4,
-		.hooknum = NF_INET_LOCAL_IN,
-		.priority = NF_IP_PRI_SELINUX_LAST + 1,
-	},
-	{
-		.hook = pkg_ip6_in,
-		.pf = NFPROTO_IPV6,
-		.hooknum = NF_INET_LOCAL_IN,
-		.priority = NF_IP6_PRI_SELINUX_LAST + 1,
-	},
+		{
+				.hook        =    pkg_ip4_in,
+				.pf        =    NFPROTO_IPV4,
+				.hooknum    =    NF_INET_LOCAL_IN,
+				.priority    =    NF_IP_PRI_SELINUX_LAST + 1,
+		},
+		{
+				.hook   =    pkg_ip6_in,
+				.pf        =    NFPROTO_IPV6,
+				.hooknum    =    NF_INET_LOCAL_IN,
+				.priority    =    NF_IP6_PRI_SELINUX_LAST + 1,
+		},
 
-	{
-		.hook = pkg_ip4_out,
-		.pf = NFPROTO_IPV4,
-		.hooknum = NF_INET_LOCAL_OUT,
-		.priority = NF_IP_PRI_SELINUX_LAST + 1,
-	},
-	{
-		.hook = pkg_ip6_out,
-		.pf = NFPROTO_IPV6,
-		.hooknum = NF_INET_LOCAL_OUT,
-		.priority = NF_IP6_PRI_SELINUX_LAST + 1,
-	},
+		{
+				.hook        =    pkg_ip4_out,
+				.pf        =    NFPROTO_IPV4,
+				.hooknum    =    NF_INET_LOCAL_OUT,
+				.priority    =    NF_IP_PRI_SELINUX_LAST + 1,
+		},
+		{
+				.hook        =    pkg_ip6_out,
+				.pf        =    NFPROTO_IPV6,
+				.hooknum    =    NF_INET_LOCAL_OUT,
+				.priority    =    NF_IP6_PRI_SELINUX_LAST + 1,
+		},
 
 };
 
@@ -266,6 +283,8 @@ static int __init millet_pkg_init(void)
 	int ret;
 	int i;
 	struct net *net = &init_net;
+
+	pr_err("enter millet_pkg_init func!\n");
 
 	for (i = 0; i < MAX_REC_UID; i++)
 		atomic_set(&uid_rec[i], 0);
@@ -277,7 +296,9 @@ static int __init millet_pkg_init(void)
 	}
 	pr_err("nf_register_hooks(millet hooks) success\n");
 	register_millet_hook(PKG_TYPE, pkg_recv_hook, pkg_sendmsg,
-			     pkg_init_millet);
+			pkg_init_millet);
+	init_millet_subsystem(PKG_TYPE);
+
 	return RET_OK;
 }
 
@@ -288,6 +309,7 @@ static void __exit millet_pkg_exit(void)
 	unregister_millet_hook(PKG_TYPE);
 	nf_unregister_net_hooks(net, pkg_nf_ops, ARRAY_SIZE(pkg_nf_ops));
 }
+
 
 module_init(millet_pkg_init);
 module_exit(millet_pkg_exit);

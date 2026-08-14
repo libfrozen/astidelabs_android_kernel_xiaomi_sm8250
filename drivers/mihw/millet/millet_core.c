@@ -8,21 +8,23 @@
  * Date:  2019/11/27
  */
 
-#define pr_fmt(fmt) "millet: " fmt
+#define pr_fmt(fmt) "millet_millet-core: " fmt
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/skbuff.h>
-#include <linux/millet.h>
 #include <linux/freezer.h>
 #include <net/sock.h>
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
 #include <linux/proc_fs.h>
+#include "millet.h"
 
 int frozen_uid_min = 10000;
+EXPORT_SYMBOL_GPL(frozen_uid_min);
 unsigned long binder_warn_ahead_space = WARN_AHEAD_SPACE;
+EXPORT_SYMBOL_GPL(binder_warn_ahead_space);
 static struct millet_sock millet_sk;
 struct proc_dir_entry *millet_rootdir;
 static unsigned int millet_debug;
@@ -31,7 +33,7 @@ module_param(millet_debug, uint, 0644);
 module_param(frozen_uid_min, uint, 0644);
 module_param(binder_warn_ahead_space, ulong, 0644);
 module_param(millet_freeze_switch, int, 0660);
-enum MILLET_VERSION millet_v = VERSION_1_0;
+enum MILLET_VERSION millet_v= VERSION_1_0;
 
 static void dump_send_msg(struct millet_data *msg)
 {
@@ -44,11 +46,11 @@ static void dump_send_msg(struct millet_data *msg)
 		return;
 	}
 
-	pr_info("msg: %d\n", msg->msg_type);
-	pr_info("type: %d\n", msg->owner);
-	pr_info("src_port: 0x%x\n", msg->src_port);
-	pr_info("dest_port: 0x%x\n", msg->dst_port);
-	pr_info("uid: %d\n", msg->uid);
+	pr_info("up msg: %d\n", msg->msg_type);
+	pr_info("up type: %d\n", msg->owner);
+	pr_info("up src_port: 0x%x\n", msg->src_port);
+	pr_info("up dest_port: 0x%x\n", msg->dst_port);
+	pr_info("up uid: %d\n", msg->uid);
 }
 
 static void dump_recv_msg(struct millet_userconf *msg)
@@ -70,30 +72,12 @@ static void dump_recv_msg(struct millet_userconf *msg)
 
 bool judge_millet_freeze_switch(void)
 {
-	return millet_freeze_switch == 1;
+	return 1 == millet_freeze_switch;
 }
 
-int millet_can_attach(struct cgroup_taskset *tset)
-{
-	const struct cred *cred = current_cred(), *tcred;
-	struct task_struct *task;
-	struct cgroup_subsys_state *css;
 
-	cgroup_taskset_for_each (task, css, tset) {
-		tcred = __task_cred(task);
-
-		if ((current != task) &&
-		    !(cred->euid.val == 1000 || capable(CAP_SYS_ADMIN))) {
-			pr_err("Permission problem\n");
-			return 1; // >0 means can't attach
-		}
-	}
-
-	return 0;
-}
-
-int millet_sendto_user(struct task_struct *tsk, struct millet_data *data,
-		       struct millet_sock *sk)
+int millet_sendto_user(struct task_struct *tsk,
+		struct millet_data *data, struct millet_sock *sk)
 {
 	int ret, msg_len = 0;
 	int monitor, monitor_port = 0;
@@ -106,15 +90,16 @@ int millet_sendto_user(struct task_struct *tsk, struct millet_data *data,
 		return RET_ERR;
 
 	if (!data || !MSG_VALID(data->msg_type)) {
-		pr_err("%s:msg or  msg type is invalid! %d\n", __func__,
-		       data->msg_type);
+		pr_err("%s:msg or  msg type is invalid! %d\n",
+		       __func__, data->msg_type);
 		return RET_ERR;
 	}
 
 	msg_len = sizeof(struct millet_data);
 	skb = nlmsg_new(msg_len, GFP_ATOMIC);
 	if (!skb) {
-		pr_err("%s alloc_skb failed! %d\n", __func__, data->owner);
+		pr_err("%s alloc_skb failed! %d\n",
+		       __func__, data->owner);
 		return RET_ERR;
 	}
 
@@ -135,26 +120,30 @@ int millet_sendto_user(struct task_struct *tsk, struct millet_data *data,
 
 	payload->monitor = monitor;
 	ktime_get_ts64(&ts);
-	payload->tm.sec = ts.tv_sec;
+	payload->tm.sec  = ts.tv_sec;
 	payload->tm.nsec = ts.tv_nsec;
 	monitor_port = atomic_read(&sk->mod[monitor].port);
-	if (millet_debug)
-		dump_send_msg(payload);
-
+	dump_send_msg(payload);
 	ret = nlmsg_unicast(sk->sock, skb, monitor_port);
-	if (ret >= 0) {
+
+	if (ret < 0) {
 		if (millet_debug)
-			pr_info("nlmsg_unicast snd msg success\n");
-	} else {
-		pr_err("nlmsg_unicast failed! %s errno %d\n", __func__, ret);
+			pr_err("nlmsg_unicast failed! %s errno %d\n",
+				__func__, ret);
 		return RET_ERR;
+	} else {
+		if (millet_debug)
+			pr_info("nlmsg_unicast snd msg success to %d\n",
+					monitor_port);
 	}
 
 	return RET_OK;
 }
+EXPORT_SYMBOL_GPL(millet_sendto_user);
+
 
 int millet_sendmsg(enum MILLET_TYPE type, struct task_struct *tsk,
-		   struct millet_data *data)
+		struct millet_data *data)
 {
 	u64 walltime, timecost;
 	unsigned long flags;
@@ -166,7 +155,7 @@ int millet_sendmsg(enum MILLET_TYPE type, struct task_struct *tsk,
 	}
 
 	if (!millet_sk.mod[type].send_to) {
-		pr_err("mod %d send_to interface is NULL");
+		pr_err("mod %d send_to interface is NULL\n", type);
 		return RET_ERR;
 	}
 
@@ -174,9 +163,9 @@ int millet_sendmsg(enum MILLET_TYPE type, struct task_struct *tsk,
 	ret = millet_sk.mod[type].send_to(tsk, data, &millet_sk);
 	spin_lock_irqsave(&millet_sk.mod[type].lock, flags);
 
-	if (ret < 0)
+	if (ret < 0) {
 		millet_sk.mod[type].stat.send_fail++;
-	else if (ret > 0)
+	} else if (ret > 0)
 		millet_sk.mod[type].stat.send_suc++;
 
 	timecost = ktime_to_us(ktime_get()) - walltime;
@@ -185,6 +174,8 @@ int millet_sendmsg(enum MILLET_TYPE type, struct task_struct *tsk,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(millet_sendmsg);
+
 
 static void recv_handler(struct sk_buff *skb)
 {
@@ -195,7 +186,7 @@ static void recv_handler(struct sk_buff *skb)
 	int from = -1;
 
 	if (!skb) {
-		pr_err("%s: skb is NULL!\n", __func__);
+		pr_err("recv_handler %s: skb is	NULL!\n", __func__);
 		return;
 	}
 
@@ -215,32 +206,40 @@ static void recv_handler(struct sk_buff *skb)
 
 	nlh = nlmsg_hdr(skb);
 	if (nlh->nlmsg_len < NLMSG_SPACE(msglen)) {
-		pr_err("msg len err %d need %d\n", nlh->nlmsg_len,
-		       NLMSG_SPACE(msglen));
+		pr_err("msg len err %d need %d\n",
+		       nlh->nlmsg_len, NLMSG_SPACE(msglen));
 		return;
 	}
 
 	from = nlh->nlmsg_pid;
-	payload = (struct millet_userconf *)NLMSG_DATA(nlh);
+	payload = (struct millet_userconf *) NLMSG_DATA(nlh);
 	if (payload->src_port != MILLET_USER_ID) {
-		pr_err("src_port %x is not valid!\n", payload->src_port);
+		pr_err("src_port %x invalid! from %d need len %d len %d\n",
+		       payload->src_port,
+		       from,
+		       nlh->nlmsg_len,
+		       NLMSG_SPACE(msglen));
+		pr_err("-------invalid msg dump------");
+		dump_recv_msg(payload);
+		pr_err("**current pid %d****\n", current->pid);
 		return;
 	}
 
 	if (payload->dst_port != MILLET_KERNEL_ID) {
-		pr_err("dst_port is %x not kernel!\n", payload->dst_port);
+		pr_err("dst_port is %x not kernel!\n",
+		       payload->dst_port);
 		return;
 	}
 
 	if (!TYPE_VALID(payload->owner)) {
-		pr_err("mod %d is not valid!\n", payload->owner);
+		pr_err("mod %d is not valid!\n",
+		       payload->owner);
 		return;
 	}
 
 	switch (payload->msg_type) {
 	case LOOPBACK_MSG: {
 		struct millet_data data;
-
 		data.msg_type = LOOPBACK_MSG;
 		data.owner = payload->owner;
 		atomic_set(&millet_sk.mod[payload->owner].port, from);
@@ -254,10 +253,8 @@ static void recv_handler(struct sk_buff *skb)
 			millet_sk.mod[payload->owner].recv_from(
 				payload, sizeof(struct millet_userconf));
 
-		if (millet_debug) {
-			pr_err("recv mesg form %d\n", from);
+		if (millet_debug)
 			dump_recv_msg(payload);
-		}
 		break;
 	}
 
@@ -289,7 +286,7 @@ static int millet_sock_show(struct seq_file *m, void *v)
 	}
 
 	total_send_suc = total_send_fail = total_runtime = 0;
-	seq_puts(m, "-----------------------------\n\n");
+	seq_printf(m, "-----------------------------\n\n");
 	for (i = O_TYPE + 1; i < MILLET_TYPES_NUM; i++) {
 		if (!send_suc[i] && !send_fail[i])
 			continue;
@@ -298,14 +295,15 @@ static int millet_sock_show(struct seq_file *m, void *v)
 		total_send_fail += send_fail[i];
 		total_runtime += runtime[i];
 
-		seq_printf(m, "name: %s mod id %d:\n", millet_sk.mod[i].name,
-			   i);
+		seq_printf(m, "name: %s mod id %d:\n",
+		           millet_sk.mod[i].name, i);
 		seq_printf(m, "send suc: %llu\n", send_suc[i]);
 		seq_printf(m, "send fail: %llu\n", send_fail[i]);
 		seq_printf(m, "runtime: %llu us\n\n", runtime[i]);
+
 	}
 
-	seq_puts(m, "---------total info--------------------\n");
+	seq_printf(m, "---------total info--------------------\n");
 	seq_printf(m, "send_suc: %llu\n", total_send_suc);
 	seq_printf(m, "send_fail: %llu\n", total_send_fail);
 	seq_printf(m, "runtime: %llu us\n", total_runtime);
@@ -331,28 +329,28 @@ static void stat_reset(void)
 	}
 }
 
-static ssize_t millet_stat_write(struct file *filp, const char __user *buf,
-				 size_t count, loff_t *f_ops)
+static ssize_t millet_stat_write(struct file *filp,
+		const char __user *buf, size_t count, loff_t *f_ops)
 {
 	unsigned char tmp = 0;
 	int value = 0;
 
 	get_user(tmp, buf);
-	if (!kstrtoint(&tmp, 10, &value)) {
-		pr_info("input value number: %d\n", value);
+	value = simple_strtol(&tmp, NULL, 10);
+	pr_info("input value number: %d\n", value);
+	if (value == 1)
 		stat_reset();
-	}
 
-	pr_warn("stat reset now\n");
+	printk(KERN_WARNING "stat reset now\n");
 	return count;
 }
 
 static const struct file_operations millet_proc_fops = {
-	.open = millet_stat_open,
-	.read = seq_read,
-	.write = millet_stat_write,
-	.llseek = seq_lseek,
-	.release = single_release,
+	.open   = millet_stat_open,
+	.read   = seq_read,
+	.write   = millet_stat_write,
+	.llseek   = seq_lseek,
+	.release   = single_release,
 	.owner = THIS_MODULE,
 };
 
@@ -368,55 +366,58 @@ static int millet_version_open(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations millet_version_fops = {
-	.open = millet_version_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
+	.open   = millet_version_open,
+	.read   = seq_read,
+	.llseek   = seq_lseek,
+	.release   = single_release,
 	.owner = THIS_MODULE,
 };
 
-int register_millet_hook(int type, recv_hook recv_from, send_hook send_to,
-			 init_hook init)
+int register_millet_hook(int type, recv_hook recv_from,
+		send_hook send_to, init_hook init)
 {
 	if (!TYPE_VALID(type)) {
-		pr_err("%s: type is invalid! %d\n", __func__, type);
+		pr_err("%s: type is invalid! %d\n",
+				__func__, type);
 		return RET_ERR;
 	}
 
-	if (!millet_sk.mod[type].init) {
+	if (millet_sk.mod[type].init) {
+		pr_err("%s: init has been registered %d\n",
+		       __func__, type);
+		return RET_ERR;
+	} else
 		millet_sk.mod[type].init = init;
-	} else {
-		pr_err("%s: init has been registered %d\n", __func__, type);
-		return RET_ERR;
-	}
 
-	if (!millet_sk.mod[type].recv_from) {
+	if (millet_sk.mod[type].recv_from) {
+		pr_err("%s: recv_from has been registered %d\n",
+		       __func__, type);
+		return RET_ERR;
+	} else
 		millet_sk.mod[type].recv_from = recv_from;
-	} else {
-		pr_err("%s: recv_from has been registered %d\n", __func__,
-		       type);
-		return RET_ERR;
-	}
 
-	if (!millet_sk.mod[type].send_to) {
-		millet_sk.mod[type].send_to = send_to;
-	} else {
-		pr_err("%s: send_to has been registered %d\n", __func__, type);
+	if (millet_sk.mod[type].send_to) {
+		pr_err("%s: send_to has been registered %d\n",
+		       __func__, type);
 		return RET_ERR;
-	}
+	} else
+		millet_sk.mod[type].send_to = send_to;
 
 	if (millet_debug) {
-		pr_info("type %d register hook\n", type);
+		printk("type %d register hook\n", type);
 		dump_stack();
 	}
 
 	return RET_OK;
 }
+EXPORT_SYMBOL_GPL(register_millet_hook);
+
 
 int unregister_millet_hook(int type)
 {
 	if (!TYPE_VALID(type)) {
-		pr_err("%s: type is invalid! %d\n", __func__, type);
+		pr_err("%s: type is invalid! %d\n",
+		       __func__, type);
 		return RET_ERR;
 	}
 
@@ -425,44 +426,56 @@ int unregister_millet_hook(int type)
 	millet_sk.mod[type].init = NULL;
 	return RET_OK;
 }
+EXPORT_SYMBOL_GPL(unregister_millet_hook);
+
+int init_millet_subsystem(int type)
+{
+	if (!TYPE_VALID(type)) {
+		pr_err("%s: type is invalid! %d\n",
+				__func__, type);
+		return RET_ERR;
+	}
+
+	atomic_set(&millet_sk.mod[type].port, 0);
+	spin_lock_init(&millet_sk.mod[type].lock);
+	if (millet_sk.mod[type].init)
+		millet_sk.mod[type].init(&millet_sk);
+
+	strlcpy(millet_sk.mod[type].name, NAME_ARRAY[type], NAME_MAXLEN);
+	return RET_OK;
+}
+EXPORT_SYMBOL_GPL(init_millet_subsystem);
+
 
 static int __init millet_init(void)
 {
 	int ret = RET_ERR;
 	struct proc_dir_entry *millet_stat_entry = NULL;
 	struct proc_dir_entry *millet_version_entry = NULL;
-	int i;
 
 	struct netlink_kernel_cfg cfg = {
 		.input = recv_handler,
 	};
 
-	millet_sk.sock = netlink_kernel_create(&init_net, NETLINK_MILLET, &cfg);
+	pr_err("enter millet_init func!\n");
+	millet_sk.sock =
+		netlink_kernel_create(&init_net, NETLINK_MILLET, &cfg);
 	if (!millet_sk.sock) {
 		pr_err("%s: create socket error!\n", __func__);
 		return ret;
-	}
-
-	for (i = O_TYPE + 1; i < MILLET_TYPES_NUM; i++) {
-		atomic_set(&millet_sk.mod[i].port, 0);
-		spin_lock_init(&millet_sk.mod[i].lock);
-		if (millet_sk.mod[i].init)
-			millet_sk.mod[i].init(&millet_sk);
-
-		strlcpy(millet_sk.mod[i].name, NAME_ARRAY[i], NAME_MAXLEN);
 	}
 
 	millet_rootdir = proc_mkdir("millet", NULL);
 	if (!millet_rootdir)
 		pr_err("create /proc/millet failed\n");
 	else {
-		millet_stat_entry = proc_create(
-			"millet_stat", 0644, millet_rootdir, &millet_proc_fops);
+		millet_stat_entry = proc_create("millet_stat",
+			0644, millet_rootdir, &millet_proc_fops);
 		if (!millet_stat_entry)
 			pr_err("create millet stat failed\n");
 
-		millet_version_entry = proc_create(
-			"version", 0644, millet_rootdir, &millet_version_fops);
+		millet_version_entry = proc_create("version",
+			0644, millet_rootdir, &millet_version_fops);
 		if (!millet_version_entry)
 			pr_err("create millet version failed\n");
 	}

@@ -235,5 +235,7 @@ source "drivers/gpu/msm/Kconfig"
 
 source "drivers/energy_model/Kconfig"
 
-source "drivers/xiaomi/Kconfig"
+source "drivers/mihw/Kconfig"
+
+source "drivers/rekernel/Kconfig"
 endmenu

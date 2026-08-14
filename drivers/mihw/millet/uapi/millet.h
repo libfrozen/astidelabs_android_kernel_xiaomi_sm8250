@@ -11,6 +11,18 @@
 #define NAME_MAXLEN		32
 #define EXT_LEN			6
 
+#ifndef ENUM_BINDER_STAT
+#define ENUM_BINDER_STAT
+enum BINDER_STAT {
+	BINDER_IN_IDLE,
+	BINDER_IN_BUSY,
+	BINDER_THREAD_IN_BUSY,
+	BINDER_PROC_IN_BUSY,
+	BINDER_IN_TRANSACTION,
+	BINDER_ST_NUM,
+};
+#endif
+
 enum MILLET_VERSION {
 	VERSION_1_0 = 1,
 	VERSION_2_0,
@@ -52,15 +64,6 @@ static const char *NAME_ARRAY[NAME_MAXLEN] = {
 	"PKG",
 	"HANDSHK",
 	"invalid",
-};
-
-enum BINDER_STAT {
-	BINDER_IN_IDLE,
-	BINDER_IN_BUSY,
-	BINDER_THREAD_IN_BUSY,
-	BINDER_PROC_IN_BUSY,
-	BINDER_IN_TRANSACTION,
-	BINDER_ST_NUM,
 };
 
 enum BINDER_EXTRA_MSG {
@@ -140,7 +143,7 @@ struct millet_data {
 
 };
 
-struct millet_userconf {
+struct millet_userconf{
 	enum MILLET_TYPE owner;
 	enum MSG_TYPE msg_type;
 	unsigned long src_port;
