@@ -102,8 +102,11 @@ echo " [*] Initializing AnyKernel3 Workspace"
 echo "==========================================="
 rm -rf anykernel
 echo "[*] Cloning AnyKernel3..."
-git clone https://github.com/AstideLabs/AnyKernel3 -b master --single-branch --depth=1 anykernel
+git clone https://github.com/AstideLabs/AnyKernel3 -b kona --single-branch --depth=1 anykernel
 echo "[+] AnyKernel3 cloned successfully."
+echo "[*] Adjusting AnyKernel3..."
+sed -i "s/^device\.name1=.*/device.name1=${DEVICE_NAME}/" anykernel/anykernel.sh
+echo "[*] AnyKernel3 adjusted successfully."
 echo "==========================================="
 
 # ==========================================
@@ -277,9 +280,6 @@ build_target() {
     if [ -f "${OUT_DIR}/arch/arm64/boot/Image" ]; then
         echo "[+] $OS_TYPE Build Successful!"
         echo "[+] Kernel Image path: ${OUT_DIR}/arch/arm64/boot/Image"
-        
-        echo "[*] Generating dtb..."
-        find "${OUT_DIR}/arch/arm64/boot/dts" -name '*.dtb' -exec cat {} + > "${OUT_DIR}/arch/arm64/boot/dtb"
 
         echo "[*] Packaging to AnyKernel3 ($OS_TYPE)..."
         # 确保独立打包：清空现有的 kernels 目录
